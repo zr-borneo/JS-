@@ -1,159 +1,198 @@
-// ========== STORE ==========
-window.m3u8Store = [];
+(function () {
+  // ---------- INIT ----------
+  window.m3u8Store = window.m3u8Store || [];
 
-// ========== TOAST CONTAINER ==========
-function ensureToastContainer() {
-  let c = document.getElementById("toast-container");
-  if (!c) {
-    c = document.createElement("div");
-    c.id = "toast-container";
-    c.style.cssText = `
-      position:fixed; top:10px; right:10px; z-index:99999;
-      display:flex; flex-direction:column; gap:8px;
-      max-width:300px;
-    `;
-    document.body.appendChild(c);
-  }
-  return c;
-}
-
-// ========== TOAST ==========
-function makeButton(label, onclick, danger) {
-  const btn = document.createElement("button");
-  btn.textContent = label;
-  btn.onclick = onclick;
-  btn.style.cssText = `
-    margin-right:6px; padding:4px 8px; border:none; border-radius:4px;
-    cursor:pointer; font-size:12px;
-    background:${danger ? "#c00" : "#444"};
-    color:#fff;
-  `;
-  return btn;
-}
-
-function toastSuccess(msg) { showSimpleToast(msg, "#2ecc71"); }
-function toastInfo(msg) { showSimpleToast(msg, "#3498db"); }
-
-function showSimpleToast(msg, bg = "#333") {
-  const container = ensureToastContainer();
-
-  if (container.children.length >= 4) {
-    container.firstChild.remove(); // Hapus toast lama
+  function extractEpisodeFromURL(url) {
+    const match = url.match(/_(\d{1,3})\//);
+    return match ? parseInt(match[1], 10) : null;
   }
 
-  const t = document.createElement("div");
-  t.textContent = msg;
-  t.style.cssText = `
-    background:${bg}; color:#fff; padding:8px 12px; border-radius:6px;
-    box-shadow:0 2px 6px rgba(0,0,0,0.3); font-family:sans-serif;
-    animation:fadeIn 0.3s ease;
-  `;
-  container.appendChild(t);
+  function saveRecord(url) {
+    if (window.m3u8Store.some(r => r.url === url)) return;
 
-  setTimeout(() => {
-    t.style.transition = "opacity 0.5s";
-    t.style.opacity = "0";
-    setTimeout(() => t.remove(), 500);
-  }, 4000);
-}
+    const episodeFromURL = extractEpisodeFromURL(url);
+    const record = {
+      pageURL: location.href,
+      url: url,
+      episodeDisplay: (document.querySelector(".ml-6")?.innerText || "").trim(),
+      episodeNumber: episodeFromURL,
+      timestamp: new Date().toISOString()
+    };
+    window.m3u8Store.push(record);
 
-function showToast(record) {
-  const container = ensureToastContainer();
-
-  if (container.children.length >= 4) {
-    container.firstChild.remove();
+    showToast(record);
+    console.log(
+      `%c[M3U8 #${window.m3u8Store.length}]`,
+      "color: lime; font-weight: bold;",
+      "\nEpisode:", record.episodeNumber ?? record.episodeDisplay,
+      "\nURL :", record.url,
+      "\nPage :", record.pageURL
+    );
   }
 
-  const toast = document.createElement("div");
-  toast.style.cssText = `
-    background:#222; color:#fff; padding:10px; border-radius:6px;
-    box-shadow:0 2px 6px rgba(0,0,0,0.3); font-family:sans-serif;
-    animation:fadeIn 0.3s ease;
-  `;
-
-  const ep = record.episodeNumber ?? record.episodeDisplay ?? "Unknown";
-  toast.innerHTML = `<div style="font-weight:bold;margin-bottom:4px">🎬 Episode ${ep}</div>`;
-
-  const btnRow = document.createElement("div");
-  btnRow.style.marginTop = "6px";
-  btnRow.appendChild(makeButton("Copy URL", () => {
-    navigator.clipboard.writeText(record.url);
-    toastSuccess("URL dicopy");
-  }));
-  btnRow.appendChild(makeButton("Tutup", () => toast.remove(), true));
-
-  toast.appendChild(btnRow);
-  container.appendChild(toast);
-
-  setTimeout(() => {
-    toast.style.transition = "opacity 0.5s";
-    toast.style.opacity = "0";
-    setTimeout(() => toast.remove(), 500);
-  }, 6000);
-}
-
-// ========== EXPORT ==========
-window.exportM3U8JSON = function () {
-  if (!window.m3u8Store.length) {
-    toastInfo("Belum ada data di m3u8Store");
-    return;
-  }
-
-  let filename = prompt("Masukkan nama file JSON:", "m3u8-data.json");
-  if (!filename) filename = "m3u8-data.json";
-  if (!filename.endsWith(".json")) filename += ".json";
-
-  const json = JSON.stringify(window.m3u8Store, null, 2);
-  const blob = new Blob([json], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  a.click();
-
-  toastSuccess(`✅ Data diexport ke ${filename}`);
-
-  // Clear setelah export
-  window.m3u8Store = [];
-  toastInfo("📭 Data m3u8Store sudah dikosongkan");
-};
-
-// ========== STICKY EXPORT BUTTON ==========
-(function addStickyExportButton() {
-  let box = document.getElementById("m3u8-sticky-export");
-  if (box) return;
-
-  box = document.createElement("div");
-  box.id = "m3u8-sticky-export";
-  box.style.cssText = `
-    position:fixed; bottom:20px; right:20px; z-index:99999;
-    background:#222; color:#fff; padding:8px 12px; border-radius:8px;
-    font-family:sans-serif; font-size:14px; cursor:move;
-    box-shadow:0 2px 8px rgba(0,0,0,0.4);
-  `;
-  box.textContent = "⬇ Export M3U8";
-  box.onclick = () => window.exportM3U8JSON();
-  document.body.appendChild(box);
-
-  // ========== DRAGGABLE ==========
-  let isDragging = false;
-  let offsetX = 0, offsetY = 0;
-
-  box.addEventListener("mousedown", (e) => {
-    isDragging = true;
-    offsetX = e.clientX - box.offsetLeft;
-    offsetY = e.clientY - box.offsetTop;
-  });
-
-  document.addEventListener("mousemove", (e) => {
-    if (isDragging) {
-      box.style.left = (e.clientX - offsetX) + "px";
-      box.style.top = (e.clientY - offsetY) + "px";
-      box.style.right = "auto";
-      box.style.bottom = "auto";
+  // ---------- HOOK FETCH ----------
+  const origFetch = window.fetch;
+  window.fetch = async (...args) => {
+    const res = await origFetch(...args);
+    if (args[0] && args[0].toString().includes(".m3u8")) {
+      saveRecord(args[0].toString());
     }
-  });
+    return res;
+  };
 
-  document.addEventListener("mouseup", () => {
-    isDragging = false;
-  });
+  // ---------- HOOK XHR ----------
+  const origOpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+    if (url && url.toString().includes(".m3u8")) {
+      this.addEventListener("load", () => saveRecord(url.toString()));
+    }
+    return origOpen.call(this, method, url, ...rest);
+  };
+
+  // ---------- EXPORT ALL (MODIFIED) ----------
+  window.exportM3U8JSON = function (clearAfterExport = false) {
+    if (!window.m3u8Store.length) {
+      toastInfo("Belum ada data di m3u8Store");
+      return;
+    }
+
+    let filename = prompt("Masukkan nama file JSON:", "m3u8-data.json");
+    if (!filename) return; // User cancelled prompt
+    if (!filename.endsWith(".json")) filename += ".json";
+
+    const json = JSON.stringify(window.m3u8Store, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href); // Clean up
+
+    toastSuccess(`✅ Data diexport ke ${filename}`);
+
+    if (clearAfterExport) {
+      window.m3u8Store = [];
+      console.log("%c[M3U8] Store dibersihkan setelah export.", "color: yellow;");
+      toastInfo("📦 Store telah dibersihkan.");
+    }
+  };
+
+  // ---------- TOAST UI ----------
+  const containerId = "m3u8-toast-container";
+  function ensureToastContainer() {
+    let el = document.getElementById(containerId);
+    if (!el) {
+      el = document.createElement("div");
+      el.id = containerId;
+      el.style.cssText = `
+        position:fixed; top:10px; right:10px; z-index:999999;
+        display:flex; flex-direction:column; gap:8px; max-width:300px;
+      `;
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+
+  function makeButton(label, onClick, small = false) {
+    const btn = document.createElement("button");
+    btn.textContent = label;
+    btn.style.cssText = `
+      background:#444; color:#fff; border:none; padding:${small ? "2px 6px" : "4px 8px"};
+      margin-left:5px; border-radius:4px; cursor:pointer; font-size:${small ? "11px" : "13px"};
+    `;
+    btn.onclick = onClick;
+    return btn;
+  }
+
+  // Notifikasi Episode (auto-hide)
+  function showToast(record) {
+    const container = ensureToastContainer();
+    const toast = document.createElement("div");
+    toast.style.cssText = `
+      background:#222; color:#fff; padding:10px; border-radius:6px;
+      box-shadow:0 2px 6px rgba(0,0,0,0.3); font-family:sans-serif;
+      animation:fadeIn 0.3s ease;
+    `;
+
+    const ep = record.episodeNumber ?? record.episodeDisplay ?? "Unknown";
+    toast.innerHTML = `<div style="font-weight:bold;margin-bottom:4px">🎬 Episode ${ep}</div>`;
+
+    const btnRow = document.createElement("div");
+    btnRow.style.marginTop = "6px";
+    btnRow.appendChild(makeButton("Copy URL", () => {
+      navigator.clipboard.writeText(record.url);
+      toastSuccess("URL dicopy");
+    }));
+    btnRow.appendChild(makeButton("Tutup", () => toast.remove(), true));
+
+    toast.appendChild(btnRow);
+    container.appendChild(toast);
+
+    setTimeout(() => {
+      toast.style.transition = "opacity 0.5s";
+      toast.style.opacity = "0";
+      setTimeout(() => toast.remove(), 500);
+    }, 6000);
+  }
+
+  // Sticky Export All Toast (MODIFIED)
+  (function showStickyExport() {
+    const container = ensureToastContainer();
+    let existing = document.getElementById("m3u8-sticky-export");
+    if (existing) return; // hanya sekali
+
+    const toast = document.createElement("div");
+    toast.id = "m3u8-sticky-export";
+    toast.style.cssText = `
+      background:#2c3e50; color:#fff; padding:10px; border-radius:6px;
+      box-shadow:0 2px 6px rgba(0,0,0,0.4); font-family:sans-serif;
+    `;
+    toast.innerHTML = `<div style="font-weight:bold;margin-bottom:6px">📂 Export M3U8</div>`;
+
+    const btnRow = document.createElement("div");
+    // === Tombol diubah di sini ===
+    btnRow.appendChild(makeButton("Export", () => window.exportM3U8JSON(false)));
+    btnRow.appendChild(makeButton("Export & Clear", () => window.exportM3U8JSON(true)));
+    btnRow.appendChild(makeButton("Deduplicate", () => window.deduplicateM3U8(), true));
+    // ============================
+
+    toast.appendChild(btnRow);
+    container.appendChild(toast);
+  })();
+
+  function toastInfo(msg) {
+    const c = ensureToastContainer();
+    const el = document.createElement("div");
+    el.style.cssText = `background:#3498db;color:#fff;padding:8px;border-radius:6px;`;
+    el.textContent = msg;
+    c.appendChild(el);
+    setTimeout(() => el.remove(), 4000);
+  }
+
+  function toastSuccess(msg) {
+    const c = ensureToastContainer();
+    const el = document.createElement("div");
+    el.style.cssText = `background:#2ecc71;color:#fff;padding:8px;border-radius:6px;`;
+    el.textContent = msg;
+    c.appendChild(el);
+    setTimeout(() => el.remove(), 4000);
+  }
+
+  // ---------- CLEAN DUPLICATE ----------
+  window.deduplicateM3U8 = function () {
+    const originalCount = window.m3u8Store.length;
+    const unique = [];
+    const seen = new Set();
+    for (const rec of window.m3u8Store) {
+      if (!seen.has(rec.url)) {
+        seen.add(rec.url);
+        unique.push(rec);
+      }
+    }
+    const removedCount = originalCount - unique.length;
+    window.m3u8Store = unique;
+    toastSuccess(`✅ ${removedCount} duplikat dibersihkan. Sisa data: ${unique.length}`);
+  };
+
+  console.log("%c[OK] M3U8 Sniffer aktif. Semua URL akan dicatat di window.m3u8Store", "color: orange;");
 })();
