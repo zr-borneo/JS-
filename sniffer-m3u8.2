@@ -49,7 +49,7 @@
     return origOpen.call(this, method, url, ...rest);
   };
 
-  // ---------- EXPORT ALL (MODIFIED) ----------
+  // ---------- EXPORT ALL ----------
   window.exportM3U8JSON = function (clearAfterExport = false) {
     if (!window.m3u8Store.length) {
       toastInfo("Belum ada data di m3u8Store");
@@ -57,7 +57,7 @@
     }
 
     let filename = prompt("Masukkan nama file JSON:", "m3u8-data.json");
-    if (!filename) return; // User cancelled prompt
+    if (!filename) return;
     if (!filename.endsWith(".json")) filename += ".json";
 
     const json = JSON.stringify(window.m3u8Store, null, 2);
@@ -66,7 +66,7 @@
     a.href = URL.createObjectURL(blob);
     a.download = filename;
     a.click();
-    URL.revokeObjectURL(a.href); // Clean up
+    URL.revokeObjectURL(a.href);
 
     toastSuccess(`✅ Data diexport ke ${filename}`);
 
@@ -79,6 +79,8 @@
 
   // ---------- TOAST UI ----------
   const containerId = "m3u8-toast-container";
+  const MAX_TOASTS = 3; // <<-- BATAS MAKSIMAL NOTIFIKASI TOAST
+
   function ensureToastContainer() {
     let el = document.getElementById(containerId);
     if (!el) {
@@ -103,11 +105,19 @@
     btn.onclick = onClick;
     return btn;
   }
-
-  // Notifikasi Episode (auto-hide)
+  
+  // Notifikasi Episode (auto-hide dan dengan batas)
   function showToast(record) {
     const container = ensureToastContainer();
+    const existingToasts = container.querySelectorAll(".m3u8-notification-toast");
+    
+    // Jika sudah mencapai batas, hapus toast yang paling lama
+    if (existingToasts.length >= MAX_TOASTS) {
+      existingToasts[0].remove();
+    }
+
     const toast = document.createElement("div");
+    toast.className = "m3u8-notification-toast"; // Tambahkan class untuk identifikasi
     toast.style.cssText = `
       background:#222; color:#fff; padding:10px; border-radius:6px;
       box-shadow:0 2px 6px rgba(0,0,0,0.3); font-family:sans-serif;
@@ -135,30 +145,73 @@
     }, 6000);
   }
 
-  // Sticky Export All Toast (MODIFIED)
+  // Sticky Export Panel (sekarang draggable)
   (function showStickyExport() {
     const container = ensureToastContainer();
-    let existing = document.getElementById("m3u8-sticky-export");
-    if (existing) return; // hanya sekali
+    if (document.getElementById("m3u8-sticky-export")) return;
 
-    const toast = document.createElement("div");
-    toast.id = "m3u8-sticky-export";
-    toast.style.cssText = `
+    const panel = document.createElement("div");
+    panel.id = "m3u8-sticky-export";
+    panel.style.cssText = `
       background:#2c3e50; color:#fff; padding:10px; border-radius:6px;
       box-shadow:0 2px 6px rgba(0,0,0,0.4); font-family:sans-serif;
+      /* Dihapus dari container utama agar bisa digeser secara mandiri */
     `;
-    toast.innerHTML = `<div style="font-weight:bold;margin-bottom:6px">📂 Export M3U8</div>`;
-
+    
+    panel.innerHTML = `<div id="m3u8-drag-handle" style="font-weight:bold;margin-bottom:6px; cursor:grab;">📂 Export M3U8</div>`;
+    
     const btnRow = document.createElement("div");
-    // === Tombol diubah di sini ===
     btnRow.appendChild(makeButton("Export", () => window.exportM3U8JSON(false)));
     btnRow.appendChild(makeButton("Export & Clear", () => window.exportM3U8JSON(true)));
     btnRow.appendChild(makeButton("Deduplicate", () => window.deduplicateM3U8(), true));
-    // ============================
 
-    toast.appendChild(btnRow);
-    container.appendChild(toast);
+    panel.appendChild(btnRow);
+    container.appendChild(panel);
+    
+    makeDraggable(panel, panel.querySelector("#m3u8-drag-handle"));
   })();
+  
+  // ---------- FITUR BARU: FUNGSI UNTUK MEMBUAT ELEMEN DRAGGABLE ----------
+  function makeDraggable(element, handle) {
+    let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+
+    handle.onmousedown = dragMouseDown;
+
+    function dragMouseDown(e) {
+      e.preventDefault();
+      pos3 = e.clientX;
+      pos4 = e.clientY;
+      document.onmouseup = closeDragElement;
+      document.onmousemove = elementDrag;
+      handle.style.cursor = "grabbing";
+    }
+
+    function elementDrag(e) {
+      e.preventDefault();
+      pos1 = pos3 - e.clientX;
+      pos2 = pos4 - e.clientY;
+      pos3 = e.clientX;
+      pos4 = e.clientY;
+      
+      let newTop = element.offsetTop - pos2;
+      let newLeft = element.offsetLeft - pos1;
+
+      // Batasi agar tidak keluar viewport
+      newTop = Math.max(0, Math.min(newTop, window.innerHeight - element.offsetHeight));
+      newLeft = Math.max(0, Math.min(newLeft, window.innerWidth - element.offsetWidth));
+      
+      element.style.top = newTop + "px";
+      element.style.left = newLeft + "px";
+      // Hapus properti right agar tidak konflik
+      element.style.right = 'auto'; 
+    }
+
+    function closeDragElement() {
+      document.onmouseup = null;
+      document.onmousemove = null;
+      handle.style.cursor = "grab";
+    }
+  }
 
   function toastInfo(msg) {
     const c = ensureToastContainer();
@@ -194,5 +247,5 @@
     toastSuccess(`✅ ${removedCount} duplikat dibersihkan. Sisa data: ${unique.length}`);
   };
 
-  console.log("%c[OK] M3U8 Sniffer aktif. Semua URL akan dicatat di window.m3u8Store", "color: orange;");
+  console.log("%c[OK] M3U8 Sniffer aktif (Draggable UI & Toast Limit).", "color: orange;");
 })();
