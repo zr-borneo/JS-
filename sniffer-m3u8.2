@@ -2,55 +2,42 @@
   // ---------- INIT ----------
   window.m3u8Store = window.m3u8Store || [];
   
-  // Variabel untuk menyimpan episode terakhir yang diklik
+  // Variabel untuk melacak urutan klik episode
+  let episodeClickCounter = 0;
   let lastClickedEpisode = null;
 
-  // Fungsi untuk menangkap klik pada elemen episode
-  function setupEpisodeClickTracker() {
-    document.addEventListener('click', function(e) {
-      // Cari elemen yang mungkin mengandung info episode
-      // Sesuaikan selector ini dengan struktur website yang dituju
-      const episodeElement = e.target.closest('[data-episode]') || 
-                            e.target.closest('.episode') ||
-                            e.target.closest('.episode-item') ||
-                            e.target.closest('a[href*="episode"]') ||
-                            e.target.closest('button[data-episode-number]');
-      
-      if (episodeElement) {
-        // Coba ekstrak nomor episode dari berbagai atribut
-        const episodeFromDataAttr = episodeElement.getAttribute('data-episode') || 
-                                   episodeElement.getAttribute('data-episode-number');
-        const episodeFromText = extractEpisodeFromText(episodeElement.textContent);
-        
-        lastClickedEpisode = episodeFromDataAttr || episodeFromText;
-        
-        if (lastClickedEpisode) {
-          console.log(`%c[Episode Click]`, "color: cyan;", `Episode ${lastClickedEpisode} terdeteksi`);
-        }
-      }
-    });
-  }
-
-  function extractEpisodeFromText(text) {
-    // Mencari pola angka dalam teks (bisa berupa "Episode 1", "EP 1", "E01", dll)
-    const patterns = [
-      /episode\s*(\d+)/i,
-      /ep\s*(\d+)/i,
-      /e\s*(\d+)/i,
-      /(\d+)/ // fallback: angka apa saja
-    ];
-    
-    for (const pattern of patterns) {
-      const match = text.match(pattern);
-      if (match) return parseInt(match[1], 10);
-    }
-    return null;
-  }
-
   function extractEpisodeFromURL(url) {
-    // Kini menggunakan data yang diklik, bukan dari URL
-    return lastClickedEpisode;
+    // Pertama coba ekstrak dari URL seperti sebelumnya
+    const match = url.match(/_(\d{1,3})\//);
+    const episodeFromURL = match ? parseInt(match[1], 10) : null;
+    
+    // Jika dari URL dapat episode number, gunakan itu
+    if (episodeFromURL) return episodeFromURL;
+    
+    // Jika dari URL null, gunakan lastClickedEpisode atau increment counter
+    if (lastClickedEpisode) {
+      return lastClickedEpisode;
+    } else {
+      episodeClickCounter++;
+      return episodeClickCounter;
+    }
   }
+
+  // Setup event listener untuk melacak klik pada episode
+  document.addEventListener('click', function(e) {
+    // Cari elemen yang mungkin merupakan tombol/link episode
+    const target = e.target;
+    const isEpisodeElement = target.closest('a[href*="episode"]') || 
+                            target.closest('button') ||
+                            target.closest('[data-episode]') ||
+                            target.closest('.episode');
+    
+    if (isEpisodeElement) {
+      episodeClickCounter++;
+      lastClickedEpisode = episodeClickCounter;
+      console.log(`%c[Episode Click]`, "color: cyan;", `Episode ${lastClickedEpisode} terdeteksi`);
+    }
+  });
 
   function saveRecord(url) {
     if (window.m3u8Store.some(r => r.url === url)) return;
@@ -61,8 +48,7 @@
       url: url,
       episodeDisplay: (document.querySelector(".ml-6")?.innerText || "").trim(),
       episodeNumber: episodeFromURL,
-      timestamp: new Date().toISOString(),
-      source: lastClickedEpisode ? 'click' : 'unknown'
+      timestamp: new Date().toISOString()
     };
     window.m3u8Store.push(record);
 
@@ -72,12 +58,8 @@
       "color: lime; font-weight: bold;",
       "\nEpisode:", record.episodeNumber ?? record.episodeDisplay,
       "\nURL :", record.url,
-      "\nPage :", record.pageURL,
-      "\nSource :", record.source
+      "\nPage :", record.pageURL
     );
-    
-    // Reset setelah digunakan (opsional)
-    // lastClickedEpisode = null;
   }
 
   // ---------- HOOK FETCH ----------
@@ -107,7 +89,7 @@
     }
 
     let filename = prompt("Masukkan nama file JSON:", "m3u8-data.json");
-    if (!filename) return;
+    if (!filename) return; // User menekan cancel
     if (!filename.endsWith(".json")) filename += ".json";
 
     const json = JSON.stringify(window.m3u8Store, null, 2);
@@ -123,16 +105,22 @@
 
   // ---------- FITUR BARU: LIHAT DATA & CLEAR DATA ----------
   
+  /**
+   * Menampilkan data yang tersimpan di console.
+   */
   window.viewM3U8Data = function() {
     if (!window.m3u8Store.length) {
         toastInfo("Belum ada data untuk ditampilkan.");
         return;
     }
     console.log("--- Menampilkan Data M3U8 yang Tertangkap ---");
-    console.table(window.m3U8Store);
+    console.table(window.m3u8Store);
     toastInfo("ℹ️ Data ditampilkan di Console (tekan F12).");
   };
 
+  /**
+   * Menghapus semua data yang tersimpan setelah konfirmasi.
+   */
   window.clearM3U8Data = function() {
     if (!window.m3u8Store.length) {
         toastInfo("Data sudah kosong.");
@@ -140,10 +128,13 @@
     }
     if (confirm("Apakah Anda yakin ingin menghapus semua data yang tertangkap?")) {
         window.m3u8Store = [];
+        episodeClickCounter = 0; // Reset counter juga
+        lastClickedEpisode = null;
         toastSuccess("✅ Semua data telah dihapus.");
         console.log("%c[M3U8] Store telah dibersihkan.", "color: yellow;");
     }
   };
+
 
   // ---------- TOAST UI ----------
   const containerId = "m3u8-toast-container";
@@ -172,6 +163,7 @@
     return btn;
   }
 
+  // Notifikasi Episode (auto-hide)
   function showToast(record) {
     const container = ensureToastContainer();
     const toast = document.createElement("div");
@@ -202,11 +194,11 @@
     }, 6000);
   }
 
-  // Sticky Export All Toast
+  // Sticky Export All Toast (Dengan tombol baru)
   (function showStickyExport() {
     const container = ensureToastContainer();
     let existing = document.getElementById("m3u8-sticky-export");
-    if (existing) return;
+    if (existing) return; // hanya sekali
 
     const toast = document.createElement("div");
     toast.id = "m3u8-sticky-export";
@@ -218,8 +210,12 @@
 
     const btnRow = document.createElement("div");
     btnRow.appendChild(makeButton("Export All", () => window.exportM3U8JSON()));
+
+    // === Tombol baru ditambahkan di sini ===
     btnRow.appendChild(makeButton("Lihat Data", () => window.viewM3U8Data(), true));
     btnRow.appendChild(makeButton("Clear", () => window.clearM3U8Data(), true));
+    // =====================================
+    
     btnRow.appendChild(makeButton("Deduplicate", () => window.deduplicateM3U8(), true));
 
     toast.appendChild(btnRow);
@@ -260,8 +256,5 @@
     toastSuccess(`✅ ${removedCount} duplikat dibersihkan. Sisa data: ${unique.length}`);
   };
 
-  // Setup tracker klik episode saat script dijalankan
-  setupEpisodeClickTracker();
-  
-  console.log("%c[OK] M3U8 Sniffer aktif. Klik pada episode untuk menangkap nomor episode.", "color: orange;");
+  console.log("%c[OK] M3U8 Sniffer aktif. Semua URL akan dicatat di window.m3u8Store", "color: orange;");
 })();
