@@ -7,11 +7,20 @@
   let episodeClickCounter = 0;
   let lastClickedEpisode = null;
 
-  // Settings untuk auto close tab
+  // Settings untuk auto close tab & auto export
   const AUTO_CLOSE_SETTINGS = {
     enabled: true, // Default enable auto close tab
-    delay: 1000 // 3 detik setelah export
+    delay: 500 // 0.5 detik setelah export
   };
+
+  const AUTO_EXPORT_SETTINGS = {
+    enabled: true, // Default enable auto export
+    delay: 2000, // 2 detik setelah data terakhir
+    minDataCount: 1 // Minimal data untuk auto export
+  };
+
+  let autoExportTimer = null;
+  let lastDataTimestamp = null;
 
   function extractEpisodeFromURL(url) {
     // Pertama coba ekstrak dari URL seperti sebelumnya
@@ -60,6 +69,9 @@
     };
     window.m3u8Store.push(record);
 
+    // Update timestamp data terakhir
+    lastDataTimestamp = Date.now();
+    
     // Hanya show toast untuk 5 data pertama atau jika ada data baru yang penting
     if (window.m3u8Store.length <= 5 || episodeFromURL) {
       showToast(record);
@@ -73,6 +85,66 @@
       "\nURL :", record.url,
       "\nPage :", record.pageURL
     );
+
+    // Start auto export timer jika enabled
+    if (AUTO_EXPORT_SETTINGS.enabled && window.m3u8Store.length >= AUTO_EXPORT_SETTINGS.minDataCount) {
+      startAutoExportTimer();
+    }
+  }
+
+  // ---------- AUTO EXPORT FEATURE ----------
+  function startAutoExportTimer() {
+    // Clear existing timer
+    if (autoExportTimer) {
+      clearTimeout(autoExportTimer);
+    }
+    
+    // Set new timer
+    autoExportTimer = setTimeout(() => {
+      if (window.m3u8Store.length > 0 && AUTO_EXPORT_SETTINGS.enabled) {
+        console.log(`%c[Auto Export] Data stabil selama ${AUTO_EXPORT_SETTINGS.delay}ms, melakukan export otomatis...`, "color: green; font-weight: bold;");
+        autoExportData();
+      }
+    }, AUTO_EXPORT_SETTINGS.delay);
+  }
+
+  function autoExportData() {
+    if (!window.m3u8Store.length) return;
+
+    const filename = `m3u8-auto-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    
+    // Tandai data yang diexport
+    const unexportedData = window.m3u8Store.filter(item => !item.exported);
+    unexportedData.forEach(item => item.exported = true);
+
+    // Simpan history export
+    const exportRecord = {
+      filename: filename,
+      timestamp: new Date().toISOString(),
+      dataCount: window.m3u8Store.length,
+      newDataCount: unexportedData.length,
+      auto: true // Tandai sebagai auto export
+    };
+    window.m3u8ExportHistory.push(exportRecord);
+
+    const json = JSON.stringify(window.m3u8Store, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+
+    updateDataCount();
+    
+    console.log(`%c[Auto Export] ✅ ${unexportedData.length} data diexport ke ${filename}`, "color: lime; font-weight: bold;");
+    
+    // Auto close tab setelah export jika enabled
+    if (AUTO_CLOSE_SETTINGS.enabled) {
+      setTimeout(() => {
+        closeCurrentTab();
+      }, AUTO_CLOSE_SETTINGS.delay);
+    }
   }
 
   // ---------- HOOK FETCH ----------
@@ -100,10 +172,21 @@
     updateAutoCloseTabButton();
     
     const status = AUTO_CLOSE_SETTINGS.enabled ? 'diaktifkan' : 'dinonaktifkan';
-    toastInfo(`Auto Close Tab ${status} - Tab akan tertutup dalam ${AUTO_CLOSE_SETTINGS.delay/1000} detik setelah export`, 3000);
+    toastInfo(`Auto Close Tab ${status}`, 2000);
     
     // Simpan preference ke localStorage
     localStorage.setItem('m3u8AutoCloseTab', AUTO_CLOSE_SETTINGS.enabled);
+  };
+
+  window.toggleAutoExport = function() {
+    AUTO_EXPORT_SETTINGS.enabled = !AUTO_EXPORT_SETTINGS.enabled;
+    updateAutoExportButton();
+    
+    const status = AUTO_EXPORT_SETTINGS.enabled ? 'diaktifkan' : 'dinonaktifkan';
+    toastInfo(`Auto Export ${status} (${AUTO_EXPORT_SETTINGS.delay}ms)`, 2000);
+    
+    // Simpan preference ke localStorage
+    localStorage.setItem('m3u8AutoExport', AUTO_EXPORT_SETTINGS.enabled);
   };
 
   function updateAutoCloseTabButton() {
@@ -134,91 +217,64 @@
     autoCloseBtn.onclick = window.toggleAutoCloseTab;
   }
 
+  function updateAutoExportButton() {
+    const stickyToast = document.getElementById("m3u8-sticky-export");
+    if (!stickyToast) return;
+    
+    let autoExportBtn = stickyToast.querySelector(".auto-export-btn");
+    if (!autoExportBtn) {
+      autoExportBtn = document.createElement("button");
+      autoExportBtn.className = "auto-export-btn";
+      autoExportBtn.style.cssText = `
+        background: #444; 
+        color: #fff; 
+        border: none; 
+        padding: 2px 6px; 
+        margin-left: 5px; 
+        border-radius: 4px; 
+        cursor: pointer; 
+        font-size: 11px;
+        border: 1px solid #666;
+      `;
+      autoExportBtn.title = "Toggle Auto Export setelah data stabil";
+      stickyToast.querySelector("div").appendChild(autoExportBtn);
+    }
+    
+    autoExportBtn.textContent = AUTO_EXPORT_SETTINGS.enabled ? "🟢 Auto Export" : "⚪ Auto Export";
+    autoExportBtn.style.background = AUTO_EXPORT_SETTINGS.enabled ? "#27ae60" : "#444";
+    autoExportBtn.onclick = window.toggleAutoExport;
+  }
+
   function closeCurrentTab() {
     console.log("%c[Auto Close Tab] Menutup tab...", "color: red; font-weight: bold;");
     
     // Coba berbagai method untuk close tab
     try {
       // Method 1: window.close() untuk tab/window yang dibuka oleh script
-      if (window.history.length > 1) {
-        window.close();
-      } else {
+      window.close();
+    } catch (e) {
+      try {
         // Method 2: Untuk tab utama, buka blank page lalu close
         window.open('', '_self')?.close();
+      } catch (e2) {
+        // Method 3: Redirect ke blank page
+        window.location.href = 'about:blank';
       }
-    } catch (e) {
-      // Method 3: Redirect ke blank page
-      window.location.href = 'about:blank';
-      
-      // Method 4: Fallback - alert user untuk close manual
-      setTimeout(() => {
-        alert("Export berhasil! Silakan tutup tab ini secara manual.");
-      }, 1000);
     }
   }
 
-  function startAutoCloseCountdown() {
-    if (!AUTO_CLOSE_SETTINGS.enabled) return;
-    
-    const countdownElement = document.createElement("div");
-    countdownElement.style.cssText = `
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: rgba(0,0,0,0.9);
-      color: white;
-      padding: 20px;
-      border-radius: 10px;
-      z-index: 1000000;
-      font-family: Arial, sans-serif;
-      text-align: center;
-      font-size: 18px;
-      box-shadow: 0 0 20px rgba(255,0,0,0.5);
-    `;
-    
-    let secondsLeft = AUTO_CLOSE_SETTINGS.delay / 1000;
-    
-    function updateCountdown() {
-      countdownElement.innerHTML = `
-        <div style="margin-bottom: 10px;">✅ Export Berhasil!</div>
-        <div>Tab akan tertutup dalam:</div>
-        <div style="font-size: 24px; color: #ff6b6b; font-weight: bold; margin: 10px 0;">
-          ${secondsLeft} detik
-        </div>
-        <button onclick="this.parentElement.remove()" style="
-          background: #666; 
-          color: white; 
-          border: none; 
-          padding: 5px 10px; 
-          border-radius: 5px; 
-          cursor: pointer;
-        ">
-          Batalkan
-        </button>
-      `;
-      
-      secondsLeft--;
-      
-      if (secondsLeft >= 0) {
-        setTimeout(updateCountdown, 1000);
-      } else {
-        countdownElement.remove();
-        closeCurrentTab();
-      }
-    }
-    
-    document.body.appendChild(countdownElement);
-    updateCountdown();
-  }
-
-  // Load auto close preference dari localStorage
+  // Load preferences dari localStorage
   const savedAutoClose = localStorage.getItem('m3u8AutoCloseTab');
   if (savedAutoClose !== null) {
     AUTO_CLOSE_SETTINGS.enabled = savedAutoClose === 'true';
   }
 
-  // ---------- EXPORT ALL ----------
+  const savedAutoExport = localStorage.getItem('m3u8AutoExport');
+  if (savedAutoExport !== null) {
+    AUTO_EXPORT_SETTINGS.enabled = savedAutoExport === 'true';
+  }
+
+  // ---------- EXPORT ALL (MANUAL) ----------
   window.exportM3U8JSON = function () {
     if (!window.m3u8Store.length) {
       toastInfo("Belum ada data di m3u8Store");
@@ -238,7 +294,8 @@
       filename: filename,
       timestamp: new Date().toISOString(),
       dataCount: window.m3u8Store.length,
-      newDataCount: unexportedData.length
+      newDataCount: unexportedData.length,
+      auto: false // Manual export
     };
     window.m3u8ExportHistory.push(exportRecord);
 
@@ -252,27 +309,23 @@
 
     updateDataCount();
     
-    // Toast yang lebih informatif tentang export
     const toastMsg = unexportedData.length > 0 
       ? `✅ ${unexportedData.length} data baru diexport ke ${filename}`
-      : `✅ Data diexport ke ${filename} (semua data sudah pernah diexport)`;
+      : `✅ Data diexport ke ${filename}`;
     
-    toastSuccess(toastMsg, 2000);
+    toastSuccess(toastMsg, 1500);
 
     // Auto close tab setelah export jika enabled
     if (AUTO_CLOSE_SETTINGS.enabled) {
-      console.log(`%c[Auto Close Tab] Akan menutup tab dalam ${AUTO_CLOSE_SETTINGS.delay/1000} detik`, "color: orange;");
+      console.log(`%c[Auto Close Tab] Menutup tab dalam ${AUTO_CLOSE_SETTINGS.delay}ms...`, "color: orange;");
       setTimeout(() => {
-        startAutoCloseCountdown();
-      }, 1000); // Tunggu 1 detik dulu biar toast keliatan
+        closeCurrentTab();
+      }, AUTO_CLOSE_SETTINGS.delay);
     }
   };
 
   // ---------- FITUR BARU: LIHAT DATA & CLEAR DATA ----------
   
-  /**
-   * Menampilkan data yang tersimpan di console.
-   */
   window.viewM3U8Data = function() {
     if (!window.m3u8Store.length) {
         toastInfo("Belum ada data untuk ditampilkan.");
@@ -286,7 +339,6 @@
       Timestamp: item.timestamp
     })));
     
-    // Juga tampilkan summary di console
     const exportedCount = window.m3u8Store.filter(item => item.exported).length;
     console.log(`%cSummary: ${exportedCount}/${window.m3u8Store.length} data sudah diexport`, 
                 "color: cyan; font-weight: bold;");
@@ -294,9 +346,6 @@
     toastInfo("ℹ️ Data ditampilkan di Console (tekan F12).", 2000);
   };
 
-  /**
-   * Menghapus semua data yang tersimpan setelah konfirmasi.
-   */
   window.clearM3U8Data = function() {
     if (!window.m3u8Store.length) {
         toastInfo("Data sudah kosong.");
@@ -352,6 +401,11 @@
     }
     if (newDataCount > 0) {
       countText += ` | 🆕: ${newDataCount}`;
+    }
+    
+    // Tambah status auto export
+    if (AUTO_EXPORT_SETTINGS.enabled && newDataCount > 0) {
+      countText += ` | ⏰: ${AUTO_EXPORT_SETTINGS.delay/1000}s`;
     }
     
     countElement.textContent = countText;
@@ -419,7 +473,7 @@
     btnRow.style.marginTop = "4px";
     btnRow.appendChild(makeButton("Copy", () => {
       navigator.clipboard.writeText(record.url);
-      toastSuccess("URL dicopy", 1500);
+      toastSuccess("URL dicopy", 1000);
     }, true));
     btnRow.appendChild(makeButton("✕", () => toast.remove(), true));
 
@@ -431,7 +485,7 @@
       toast.style.transition = "opacity 0.3s";
       toast.style.opacity = "0";
       setTimeout(() => toast.remove(), 300);
-    }, 3000);
+    }, 2000);
   }
 
   // Sticky Export All Toast
@@ -457,8 +511,9 @@
     toast.appendChild(btnRow);
     container.appendChild(toast);
     
-    // Tambahkan tombol auto close tab
+    // Tambahkan tombol auto close tab dan auto export
     updateAutoCloseTabButton();
+    updateAutoExportButton();
     updateDataCount();
   })();
 
@@ -499,5 +554,6 @@
   };
 
   console.log("%c[OK] M3U8 Sniffer aktif. Semua URL akan dicatat di window.m3u8Store", "color: orange;");
-  console.log("%c[Auto Close Tab] Fitur: " + (AUTO_CLOSE_SETTINGS.enabled ? "AKTIF 🔴" : "NONAKTIF ⚪"), "color: cyan;");
+  console.log("%c[Auto Close Tab] " + (AUTO_CLOSE_SETTINGS.enabled ? "AKTIF 🔴" : "NONAKTIF ⚪"), "color: cyan;");
+  console.log("%c[Auto Export] " + (AUTO_EXPORT_SETTINGS.enabled ? `AKTIF 🟢 (${AUTO_EXPORT_SETTINGS.delay}ms)` : "NONAKTIF ⚪"), "color: green;");
 })();
