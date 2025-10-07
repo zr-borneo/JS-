@@ -55,6 +55,102 @@
     }
   });
 
+  // ---------- GET FILENAME FUNCTIONS ----------
+  async function getFilenameFromClipboard() {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text && text.trim().length > 0) {
+        // Clean filename dari karakter tidak valid
+        let cleanName = text.trim()
+          .replace(/[<>:"/\\|?*]/g, '') // Hapus karakter invalid
+          .replace(/\s+/g, '_') // Ganti spasi dengan underscore
+          .substring(0, 100); // Batasi panjang
+        return cleanName || null;
+      }
+    } catch (error) {
+      console.log("%c[Clipboard] Tidak bisa membaca clipboard:", "color: orange;", error);
+    }
+    return null;
+  }
+
+  function getFilenameFromTitle() {
+    try {
+      // Coba berbagai selector untuk judul
+      const selectors = [
+        '//*[@id="__nuxt"]/div[2]/div/div/div/div/div[2]/div/h1',
+        'h1',
+        '.title',
+        '[class*="title"]',
+        '[class*="judul"]',
+        'div h1',
+        'header h1'
+      ];
+      
+      for (const selector of selectors) {
+        try {
+          let element;
+          if (selector.startsWith('//')) {
+            // XPath selector
+            const result = document.evaluate(selector, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+            element = result.singleNodeValue;
+          } else {
+            // CSS selector
+            element = document.querySelector(selector);
+          }
+          
+          if (element && element.textContent && element.textContent.trim().length > 0) {
+            let title = element.textContent.trim();
+            // Clean title untuk filename
+            title = title
+              .replace(/[<>:"/\\|?*]/g, '')
+              .replace(/\s+/g, '_')
+              .substring(0, 100);
+            return title || null;
+          }
+        } catch (e) {
+          // Continue ke selector berikutnya
+        }
+      }
+    } catch (error) {
+      console.log("%c[Title] Tidak bisa mendapatkan judul:", "color: orange;", error);
+    }
+    return null;
+  }
+
+  function getFilenameFromURL() {
+    try {
+      const url = new URL(window.location.href);
+      const pathParts = url.pathname.split('/').filter(part => part.length > 0);
+      if (pathParts.length > 0) {
+        return pathParts[pathParts.length - 1].replace(/[^a-zA-Z0-9]/g, '_');
+      }
+    } catch (error) {
+      console.log("%c[URL] Tidak bisa mendapatkan nama dari URL:", "color: orange;", error);
+    }
+    return null;
+  }
+
+  async function generateFilename() {
+    // Priority: Clipboard -> Title -> URL -> Default
+    let filename = await getFilenameFromClipboard();
+    
+    if (!filename) {
+      filename = getFilenameFromTitle();
+    }
+    
+    if (!filename) {
+      filename = getFilenameFromURL();
+    }
+    
+    // Fallback ke default dengan timestamp
+    if (!filename) {
+      const now = new Date();
+      filename = `m3u8_${now.getFullYear()}${(now.getMonth()+1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}_${now.getHours().toString().padStart(2, '0')}${now.getMinutes().toString().padStart(2, '0')}`;
+    }
+    
+    return filename;
+  }
+
   function saveRecord(url) {
     if (window.m3u8Store.some(r => r.url === url)) return;
 
@@ -108,10 +204,11 @@
     }, AUTO_EXPORT_SETTINGS.delay);
   }
 
-  function autoExportData() {
+  async function autoExportData() {
     if (!window.m3u8Store.length) return;
 
-    const filename = `m3u8-auto-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    const baseFilename = await generateFilename();
+    const filename = `${baseFilename}.json`;
     
     // Tandai data yang diexport
     const unexportedData = window.m3u8Store.filter(item => !item.exported);
@@ -138,6 +235,7 @@
     updateDataCount();
     
     console.log(`%c[Auto Export] ✅ ${unexportedData.length} data diexport ke ${filename}`, "color: lime; font-weight: bold;");
+    console.log(`%c[Filename Source] ${getFilenameSource(baseFilename)}`, "color: cyan;");
     
     // Auto close tab setelah export jika enabled
     if (AUTO_CLOSE_SETTINGS.enabled) {
@@ -145,6 +243,12 @@
         closeCurrentTab();
       }, AUTO_CLOSE_SETTINGS.delay);
     }
+  }
+
+  function getFilenameSource(filename) {
+    if (filename.includes('m3u8_202')) return 'DEFAULT_TIMESTAMP';
+    if (filename.match(/^[a-f0-9]+$/)) return 'URL';
+    return 'CLIPBOARD_OR_TITLE';
   }
 
   // ---------- HOOK FETCH ----------
@@ -275,13 +379,16 @@
   }
 
   // ---------- EXPORT ALL (MANUAL) ----------
-  window.exportM3U8JSON = function () {
+  window.exportM3U8JSON = async function () {
     if (!window.m3u8Store.length) {
       toastInfo("Belum ada data di m3u8Store");
       return;
     }
 
-    let filename = prompt("Masukkan nama file JSON:", "m3u8-data.json");
+    const baseFilename = await generateFilename();
+    const defaultFilename = `${baseFilename}.json`;
+    
+    let filename = prompt("Masukkan nama file JSON:", defaultFilename);
     if (!filename) return; // User menekan cancel
     if (!filename.endsWith(".json")) filename += ".json";
 
@@ -314,6 +421,7 @@
       : `✅ Data diexport ke ${filename}`;
     
     toastSuccess(toastMsg, 1500);
+    console.log(`%c[Export] Filename source: ${getFilenameSource(baseFilename)}`, "color: cyan;");
 
     // Auto close tab setelah export jika enabled
     if (AUTO_CLOSE_SETTINGS.enabled) {
@@ -556,4 +664,5 @@
   console.log("%c[OK] M3U8 Sniffer aktif. Semua URL akan dicatat di window.m3u8Store", "color: orange;");
   console.log("%c[Auto Close Tab] " + (AUTO_CLOSE_SETTINGS.enabled ? "AKTIF 🔴" : "NONAKTIF ⚪"), "color: cyan;");
   console.log("%c[Auto Export] " + (AUTO_EXPORT_SETTINGS.enabled ? `AKTIF 🟢 (${AUTO_EXPORT_SETTINGS.delay}ms)` : "NONAKTIF ⚪"), "color: green;");
+  console.log("%c[Filename] Sistem akan menggunakan: Clipboard → Title → URL → Default", "color: blue;");
 })();
