@@ -1,37 +1,27 @@
 (function () {
   // ---------- INIT ----------
   window.m3u8Store = window.m3u8Store || [];
-  window.m3u8ExportHistory = window.m3u8ExportHistory || []; // History export
   
   // Variabel untuk melacak urutan klik episode
   let episodeClickCounter = 0;
   let lastClickedEpisode = null;
 
-  // Settings untuk auto close tab & auto export
-  const AUTO_CLOSE_SETTINGS = {
-    enabled: true, // Default enable auto close tab
-    delay: 500 // 0.5 detik setelah export
-  };
-
+  // Settings untuk auto export
   const AUTO_EXPORT_SETTINGS = {
-    enabled: true, // Default enable auto export
+    enabled: true,
     delay: 2000, // 2 detik setelah data terakhir
-    minDataCount: 1 // Minimal data untuk auto export
+    minDataCount: 1
   };
 
   let autoExportTimer = null;
   let lastDataTimestamp = null;
-  let lastFilenameSource = ''; // Untuk menyimpan sumber filename terakhir
 
   function extractEpisodeFromURL(url) {
-    // Pertama coba ekstrak dari URL seperti sebelumnya
     const match = url.match(/_(\d{1,3})\//);
     const episodeFromURL = match ? parseInt(match[1], 10) : null;
     
-    // Jika dari URL dapat episode number, gunakan itu
     if (episodeFromURL) return episodeFromURL;
     
-    // Jika dari URL null, gunakan lastClickedEpisode atau increment counter
     if (lastClickedEpisode) {
       return lastClickedEpisode;
     } else {
@@ -42,7 +32,6 @@
 
   // Setup event listener untuk melacak klik pada episode
   document.addEventListener('click', function(e) {
-    // Cari elemen yang mungkin merupakan tombol/link episode
     const target = e.target;
     const isEpisodeElement = target.closest('a[href*="episode"]') || 
                             target.closest('button') ||
@@ -52,7 +41,6 @@
     if (isEpisodeElement) {
       episodeClickCounter++;
       lastClickedEpisode = episodeClickCounter;
-      console.log(`%c[Episode Click]`, "color: cyan;", `Episode ${lastClickedEpisode} terdeteksi`);
     }
   });
 
@@ -61,108 +49,68 @@
     try {
       const text = await navigator.clipboard.readText();
       if (text && text.trim().length > 0) {
-        // Clean filename dari karakter tidak valid
         let cleanName = text.trim()
-          .replace(/[<>:"/\\|?*]/g, '') // Hapus karakter invalid
-          .replace(/\s+/g, '_') // Ganti spasi dengan underscore
-          .substring(0, 100); // Batasi panjang
-        return { name: cleanName, source: 'CLIPBOARD' };
+          .replace(/[<>:"/\\|?*]/g, '')
+          .replace(/\s+/g, '_')
+          .substring(0, 100);
+        return cleanName;
       }
     } catch (error) {
-      console.log("%c[Clipboard] Tidak bisa membaca clipboard:", "color: orange;", error);
+      console.log("%c[Clipboard] Tidak bisa membaca clipboard", "color: orange;");
     }
     return null;
   }
 
   function getFilenameFromTitle() {
     try {
-      // Coba berbagai selector untuk judul
       const selectors = [
         '//*[@id="__nuxt"]/div[2]/div/div/div/div/div[2]/div/h1',
         'h1',
         '.title',
         '[class*="title"]',
-        '[class*="judul"]',
-        'div h1',
-        'header h1'
+        '[class*="judul"]'
       ];
       
       for (const selector of selectors) {
         try {
           let element;
           if (selector.startsWith('//')) {
-            // XPath selector
             const result = document.evaluate(selector, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
             element = result.singleNodeValue;
           } else {
-            // CSS selector
             element = document.querySelector(selector);
           }
           
           if (element && element.textContent && element.textContent.trim().length > 0) {
             let title = element.textContent.trim();
-            // Clean title untuk filename
             title = title
               .replace(/[<>:"/\\|?*]/g, '')
               .replace(/\s+/g, '_')
               .substring(0, 100);
-            return { name: title, source: 'TITLE' };
+            return title;
           }
-        } catch (e) {
-          // Continue ke selector berikutnya
-        }
+        } catch (e) {}
       }
     } catch (error) {
-      console.log("%c[Title] Tidak bisa mendapatkan judul:", "color: orange;", error);
-    }
-    return null;
-  }
-
-  function getFilenameFromURL() {
-    try {
-      const url = new URL(window.location.href);
-      const pathParts = url.pathname.split('/').filter(part => part.length > 0);
-      if (pathParts.length > 0) {
-        const name = pathParts[pathParts.length - 1].replace(/[^a-zA-Z0-9]/g, '_');
-        return { name: name, source: 'URL' };
-      }
-    } catch (error) {
-      console.log("%c[URL] Tidak bisa mendapatkan nama dari URL:", "color: orange;", error);
+      console.log("%c[Title] Tidak bisa mendapatkan judul", "color: orange;");
     }
     return null;
   }
 
   async function generateFilename() {
-    // Priority: Clipboard -> Title -> URL -> Default
-    let result = await getFilenameFromClipboard();
+    // Priority: Clipboard -> Title -> Default
+    let filename = await getFilenameFromClipboard();
     
-    if (!result) {
-      result = getFilenameFromTitle();
+    if (!filename) {
+      filename = getFilenameFromTitle();
     }
     
-    if (!result) {
-      result = getFilenameFromURL();
-    }
-    
-    // Fallback ke default dengan timestamp
-    if (!result) {
+    if (!filename) {
       const now = new Date();
-      const name = `m3u8_${now.getFullYear()}${(now.getMonth()+1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}_${now.getHours().toString().padStart(2, '0')}${now.getMinutes().toString().padStart(2, '0')}`;
-      result = { name: name, source: 'DEFAULT' };
+      filename = `m3u8_${now.getFullYear()}${(now.getMonth()+1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}_${now.getHours().toString().padStart(2, '0')}${now.getMinutes().toString().padStart(2, '0')}`;
     }
     
-    lastFilenameSource = result.source; // Simpan sumber untuk ditampilkan di toast
-    return result.name;
-  }
-
-  function getSourceDisplayName(source) {
-    const sourceNames = {
-      'CLIPBOARD': '📋 Clipboard',
-      'TITLE': '🏷️ Title', 
-      'URL': '🔗 URL',
-      'DEFAULT': '⏰ Default'
-    };
-    return sourceNames[source] || source;
+    return filename;
   }
 
   function saveRecord(url) {
@@ -175,28 +123,19 @@
       episodeDisplay: (document.querySelector(".ml-6")?.innerText || "").trim(),
       episodeNumber: episodeFromURL,
       timestamp: new Date().toISOString(),
-      exported: false // Flag untuk menandai sudah diexport atau belum
+      exported: false
     };
     window.m3u8Store.push(record);
 
-    // Update timestamp data terakhir
     lastDataTimestamp = Date.now();
     
-    // Hanya show toast untuk 5 data pertama atau jika ada data baru yang penting
-    if (window.m3u8Store.length <= 5 || episodeFromURL) {
-      showToast(record);
-    }
-    
-    updateDataCount();
     console.log(
       `%c[M3U8 #${window.m3u8Store.length}]`,
-      "color: lime; font-weight: bold;",
-      "\nEpisode:", record.episodeNumber ?? record.episodeDisplay,
-      "\nURL :", record.url,
-      "\nPage :", record.pageURL
+      "color: lime;",
+      "Episode:", record.episodeNumber ?? record.episodeDisplay
     );
 
-    // Start auto export timer jika enabled
+    // Start auto export timer
     if (AUTO_EXPORT_SETTINGS.enabled && window.m3u8Store.length >= AUTO_EXPORT_SETTINGS.minDataCount) {
       startAutoExportTimer();
     }
@@ -204,40 +143,129 @@
 
   // ---------- AUTO EXPORT FEATURE ----------
   function startAutoExportTimer() {
-    // Clear existing timer
     if (autoExportTimer) {
       clearTimeout(autoExportTimer);
     }
     
-    // Set new timer
     autoExportTimer = setTimeout(() => {
       if (window.m3u8Store.length > 0 && AUTO_EXPORT_SETTINGS.enabled) {
-        console.log(`%c[Auto Export] Data stabil selama ${AUTO_EXPORT_SETTINGS.delay}ms, melakukan export otomatis...`, "color: green; font-weight: bold;");
-        autoExportData();
+        console.log(`%c[Auto Export] Data stabil, melakukan export...`, "color: green;");
+        showExportPrompt();
       }
     }, AUTO_EXPORT_SETTINGS.delay);
   }
 
-  async function autoExportData() {
-    if (!window.m3u8Store.length) return;
-
-    const baseFilename = await generateFilename();
-    const filename = `${baseFilename}.json`;
+  async function showExportPrompt() {
+    const defaultFilename = await generateFilename();
+    const filename = `${defaultFilename}.json`;
     
+    // Buat custom prompt yang lebih user friendly
+    const promptResult = createCustomPrompt(filename);
+    
+    if (promptResult) {
+      await exportAndExit(promptResult.filename);
+    }
+  }
+
+  function createCustomPrompt(defaultFilename) {
+    // Create overlay
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.7);
+      z-index: 1000000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-family: Arial, sans-serif;
+    `;
+
+    // Create dialog
+    const dialog = document.createElement('div');
+    dialog.style.cssText = `
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+      width: 400px;
+      max-width: 90%;
+    `;
+
+    dialog.innerHTML = `
+      <h3 style="margin: 0 0 15px 0; color: #333;">Export M3U8 Data</h3>
+      <p style="margin: 0 0 10px 0; color: #666; font-size: 14px;">
+        ${window.m3u8Store.length} data M3U8 berhasil ditangkap.
+      </p>
+      <div style="margin: 15px 0;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Nama File:</label>
+        <input type="text" 
+               id="filenameInput" 
+               value="${defaultFilename}" 
+               style="width: 100%; padding: 8px; border: 2px solid #ddd; border-radius: 5px; font-size: 14px;"
+               onfocus="this.select()">
+      </div>
+      <div style="display: flex; gap: 10px; justify-content: flex-end;">
+        <button id="cancelBtn" style="padding: 8px 16px; border: 1px solid #ddd; background: #f5f5f5; border-radius: 5px; cursor: pointer;">Batal</button>
+        <button id="exportBtn" style="padding: 8px 16px; border: none; background: #2ecc71; color: white; border-radius: 5px; cursor: pointer; font-weight: bold;">Export & Exit</button>
+      </div>
+    `;
+
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+
+    // Focus input dan select semua text
+    const input = dialog.querySelector('#filenameInput');
+    input.focus();
+    input.select();
+
+    return new Promise((resolve) => {
+      const exportBtn = dialog.querySelector('#exportBtn');
+      const cancelBtn = dialog.querySelector('#cancelBtn');
+
+      exportBtn.onclick = () => {
+        let filename = input.value.trim();
+        if (!filename) {
+          filename = defaultFilename;
+        }
+        if (!filename.endsWith('.json')) {
+          filename += '.json';
+        }
+        document.body.removeChild(overlay);
+        resolve({ filename: filename, action: 'export' });
+      };
+
+      cancelBtn.onclick = () => {
+        document.body.removeChild(overlay);
+        resolve(null);
+      };
+
+      // Enter key to export
+      input.onkeypress = (e) => {
+        if (e.key === 'Enter') {
+          exportBtn.click();
+        }
+      };
+
+      // ESC key to cancel
+      overlay.onkeydown = (e) => {
+        if (e.key === 'Escape') {
+          cancelBtn.click();
+        }
+      };
+
+      // Auto focus overlay
+      overlay.focus();
+    });
+  }
+
+  async function exportAndExit(filename) {
     // Tandai data yang diexport
     const unexportedData = window.m3u8Store.filter(item => !item.exported);
     unexportedData.forEach(item => item.exported = true);
-
-    // Simpan history export
-    const exportRecord = {
-      filename: filename,
-      timestamp: new Date().toISOString(),
-      dataCount: window.m3u8Store.length,
-      newDataCount: unexportedData.length,
-      auto: true, // Tandai sebagai auto export
-      source: lastFilenameSource // Simpan sumber filename
-    };
-    window.m3u8ExportHistory.push(exportRecord);
 
     const json = JSON.stringify(window.m3u8Store, null, 2);
     const blob = new Blob([json], { type: "application/json" });
@@ -247,24 +275,23 @@
     a.click();
     URL.revokeObjectURL(a.href);
 
-    updateDataCount();
-    
-    console.log(`%c[Auto Export] ✅ ${unexportedData.length} data diexport ke ${filename}`, "color: lime; font-weight: bold;");
-    console.log(`%c[Filename Source] ${lastFilenameSource}`, "color: cyan;");
-    
-    // Tampilkan toast dengan info sumber filename
-    const sourceDisplay = getSourceDisplayName(lastFilenameSource);
-    toastSuccess(`✅ ${unexportedData.length} data diexport<br>📁 ${filename}<br>${sourceDisplay}`, 3000);
-    
-    // Auto close tab setelah export jika enabled
-    if (AUTO_CLOSE_SETTINGS.enabled) {
-      setTimeout(() => {
-        closeCurrentTab();
-      }, AUTO_CLOSE_SETTINGS.delay);
-    }
+    console.log(`%c[Export] ✅ ${unexportedData.length} data diexport ke ${filename}`, "color: lime;");
+
+    // Tunggu sebentar lalu close tab
+    setTimeout(() => {
+      try {
+        window.close();
+      } catch (e) {
+        try {
+          window.open('', '_self')?.close();
+        } catch (e2) {
+          window.location.href = 'about:blank';
+        }
+      }
+    }, 500);
   }
 
-  // ---------- HOOK FETCH ----------
+  // ---------- HOOK FETCH & XHR ----------
   const origFetch = window.fetch;
   window.fetch = async (...args) => {
     const res = await origFetch(...args);
@@ -274,7 +301,6 @@
     return res;
   };
 
-  // ---------- HOOK XHR ----------
   const origOpen = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function (method, url, ...rest) {
     if (url && url.toString().includes(".m3u8")) {
@@ -283,404 +309,39 @@
     return origOpen.call(this, method, url, ...rest);
   };
 
-  // ---------- FITUR AUTO CLOSE TAB ----------
-  window.toggleAutoCloseTab = function() {
-    AUTO_CLOSE_SETTINGS.enabled = !AUTO_CLOSE_SETTINGS.enabled;
-    updateAutoCloseTabButton();
-    
-    const status = AUTO_CLOSE_SETTINGS.enabled ? 'diaktifkan' : 'dinonaktifkan';
-    toastInfo(`Auto Close Tab ${status}`, 2000);
-    
-    // Simpan preference ke localStorage
-    localStorage.setItem('m3u8AutoCloseTab', AUTO_CLOSE_SETTINGS.enabled);
-  };
-
-  window.toggleAutoExport = function() {
-    AUTO_EXPORT_SETTINGS.enabled = !AUTO_EXPORT_SETTINGS.enabled;
-    updateAutoExportButton();
-    
-    const status = AUTO_EXPORT_SETTINGS.enabled ? 'diaktifkan' : 'dinonaktifkan';
-    toastInfo(`Auto Export ${status} (${AUTO_EXPORT_SETTINGS.delay}ms)`, 2000);
-    
-    // Simpan preference ke localStorage
-    localStorage.setItem('m3u8AutoExport', AUTO_EXPORT_SETTINGS.enabled);
-  };
-
-  function updateAutoCloseTabButton() {
-    const stickyToast = document.getElementById("m3u8-sticky-export");
-    if (!stickyToast) return;
-    
-    let autoCloseBtn = stickyToast.querySelector(".auto-close-tab-btn");
-    if (!autoCloseBtn) {
-      autoCloseBtn = document.createElement("button");
-      autoCloseBtn.className = "auto-close-tab-btn";
-      autoCloseBtn.style.cssText = `
-        background: #444; 
-        color: #fff; 
-        border: none; 
-        padding: 2px 6px; 
-        margin-left: 5px; 
-        border-radius: 4px; 
-        cursor: pointer; 
-        font-size: 11px;
-        border: 1px solid #666;
-      `;
-      autoCloseBtn.title = "Toggle Auto Close Tab setelah export";
-      stickyToast.querySelector("div").appendChild(autoCloseBtn);
-    }
-    
-    autoCloseBtn.textContent = AUTO_CLOSE_SETTINGS.enabled ? "🔴 Close Tab" : "⚪ Close Tab";
-    autoCloseBtn.style.background = AUTO_CLOSE_SETTINGS.enabled ? "#e74c3c" : "#444";
-    autoCloseBtn.onclick = window.toggleAutoCloseTab;
-  }
-
-  function updateAutoExportButton() {
-    const stickyToast = document.getElementById("m3u8-sticky-export");
-    if (!stickyToast) return;
-    
-    let autoExportBtn = stickyToast.querySelector(".auto-export-btn");
-    if (!autoExportBtn) {
-      autoExportBtn = document.createElement("button");
-      autoExportBtn.className = "auto-export-btn";
-      autoExportBtn.style.cssText = `
-        background: #444; 
-        color: #fff; 
-        border: none; 
-        padding: 2px 6px; 
-        margin-left: 5px; 
-        border-radius: 4px; 
-        cursor: pointer; 
-        font-size: 11px;
-        border: 1px solid #666;
-      `;
-      autoExportBtn.title = "Toggle Auto Export setelah data stabil";
-      stickyToast.querySelector("div").appendChild(autoExportBtn);
-    }
-    
-    autoExportBtn.textContent = AUTO_EXPORT_SETTINGS.enabled ? "🟢 Auto Export" : "⚪ Auto Export";
-    autoExportBtn.style.background = AUTO_EXPORT_SETTINGS.enabled ? "#27ae60" : "#444";
-    autoExportBtn.onclick = window.toggleAutoExport;
-  }
-
-  function closeCurrentTab() {
-    console.log("%c[Auto Close Tab] Menutup tab...", "color: red; font-weight: bold;");
-    
-    // Coba berbagai method untuk close tab
-    try {
-      // Method 1: window.close() untuk tab/window yang dibuka oleh script
-      window.close();
-    } catch (e) {
-      try {
-        // Method 2: Untuk tab utama, buka blank page lalu close
-        window.open('', '_self')?.close();
-      } catch (e2) {
-        // Method 3: Redirect ke blank page
-        window.location.href = 'about:blank';
-      }
-    }
-  }
-
-  // Load preferences dari localStorage
-  const savedAutoClose = localStorage.getItem('m3u8AutoCloseTab');
-  if (savedAutoClose !== null) {
-    AUTO_CLOSE_SETTINGS.enabled = savedAutoClose === 'true';
-  }
-
-  const savedAutoExport = localStorage.getItem('m3u8AutoExport');
-  if (savedAutoExport !== null) {
-    AUTO_EXPORT_SETTINGS.enabled = savedAutoExport === 'true';
-  }
-
-  // ---------- EXPORT ALL (MANUAL) ----------
+  // ---------- MANUAL EXPORT ----------
   window.exportM3U8JSON = async function () {
     if (!window.m3u8Store.length) {
-      toastInfo("Belum ada data di m3u8Store");
+      alert("Belum ada data M3U8 yang ditangkap.");
       return;
     }
-
-    const baseFilename = await generateFilename();
-    const defaultFilename = `${baseFilename}.json`;
-    
-    let filename = prompt("Masukkan nama file JSON:", defaultFilename);
-    if (!filename) return; // User menekan cancel
-    if (!filename.endsWith(".json")) filename += ".json";
-
-    // Tandai data yang diexport
-    const unexportedData = window.m3u8Store.filter(item => !item.exported);
-    unexportedData.forEach(item => item.exported = true);
-
-    // Simpan history export
-    const exportRecord = {
-      filename: filename,
-      timestamp: new Date().toISOString(),
-      dataCount: window.m3u8Store.length,
-      newDataCount: unexportedData.length,
-      auto: false, // Manual export
-      source: lastFilenameSource // Simpan sumber filename
-    };
-    window.m3u8ExportHistory.push(exportRecord);
-
-    const json = JSON.stringify(window.m3u8Store, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(a.href);
-
-    updateDataCount();
-    
-    const sourceDisplay = getSourceDisplayName(lastFilenameSource);
-    const toastMsg = unexportedData.length > 0 
-      ? `✅ ${unexportedData.length} data baru diexport<br>📁 ${filename}<br>${sourceDisplay}`
-      : `✅ Data diexport<br>📁 ${filename}<br>${sourceDisplay}`;
-    
-    toastSuccess(toastMsg, 3000);
-    console.log(`%c[Export] Filename source: ${lastFilenameSource}`, "color: cyan;");
-
-    // Auto close tab setelah export jika enabled
-    if (AUTO_CLOSE_SETTINGS.enabled) {
-      console.log(`%c[Auto Close Tab] Menutup tab dalam ${AUTO_CLOSE_SETTINGS.delay}ms...`, "color: orange;");
-      setTimeout(() => {
-        closeCurrentTab();
-      }, AUTO_CLOSE_SETTINGS.delay);
-    }
+    await showExportPrompt();
   };
 
-  // ---------- FITUR BARU: LIHAT DATA & CLEAR DATA ----------
-  
-  window.viewM3U8Data = function() {
-    if (!window.m3u8Store.length) {
-        toastInfo("Belum ada data untuk ditampilkan.");
-        return;
-    }
-    console.log("--- Menampilkan Data M3U8 yang Tertangkap ---");
-    console.table(window.m3u8Store.map(item => ({
-      Episode: item.episodeNumber ?? item.episodeDisplay,
-      URL: item.url,
-      Exported: item.exported ? '✅' : '❌',
-      Timestamp: item.timestamp
-    })));
-    
-    const exportedCount = window.m3u8Store.filter(item => item.exported).length;
-    console.log(`%cSummary: ${exportedCount}/${window.m3u8Store.length} data sudah diexport`, 
-                "color: cyan; font-weight: bold;");
-    
-    toastInfo("ℹ️ Data ditampilkan di Console (tekan F12).", 2000);
-  };
-
-  window.clearM3U8Data = function() {
-    if (!window.m3u8Store.length) {
-        toastInfo("Data sudah kosong.");
-        return;
-    }
-    
-    const unexportedCount = window.m3u8Store.filter(item => !item.exported).length;
-    let confirmMsg = "Apakah Anda yakin ingin menghapus semua data yang tertangkap?";
-    
-    if (unexportedCount > 0) {
-      confirmMsg += `\n\n⚠️ PERINGATAN: Ada ${unexportedCount} data yang BELUM di export!`;
-    }
-    
-    if (confirm(confirmMsg)) {
-        window.m3u8Store = [];
-        episodeClickCounter = 0;
-        lastClickedEpisode = null;
-        updateDataCount();
-        toastSuccess("✅ Semua data telah dihapus.", 2000);
-        console.log("%c[M3U8] Store telah dibersihkan.", "color: yellow;");
-    }
-  };
-
-  // ---------- FITUR BARU: UPDATE DATA COUNT DISPLAY ----------
-  function updateDataCount() {
-    const stickyToast = document.getElementById("m3u8-sticky-export");
-    if (!stickyToast) return;
-    
-    const countElement = stickyToast.querySelector(".data-count") || document.createElement("div");
-    
-    if (!stickyToast.querySelector(".data-count")) {
-      countElement.className = "data-count";
-      countElement.style.cssText = `
-        font-size: 12px;
-        color: #ecf0f1;
-        background: #34495e;
-        padding: 3px 8px;
-        border-radius: 12px;
-        margin-top: 5px;
-        text-align: center;
-        font-weight: bold;
-      `;
-      stickyToast.appendChild(countElement);
-    }
-    
-    const totalCount = window.m3u8Store.length;
-    const exportedCount = window.m3u8Store.filter(item => item.exported).length;
-    const newDataCount = totalCount - exportedCount;
-    
-    let countText = `📊 Total: ${totalCount}`;
-    if (exportedCount > 0) {
-      countText += ` | ✅: ${exportedCount}`;
-    }
-    if (newDataCount > 0) {
-      countText += ` | 🆕: ${newDataCount}`;
-    }
-    
-    // Tambah status auto export
-    if (AUTO_EXPORT_SETTINGS.enabled && newDataCount > 0) {
-      countText += ` | ⏰: ${AUTO_EXPORT_SETTINGS.delay/1000}s`;
-    }
-    
-    countElement.textContent = countText;
-    
-    // Warna background berdasarkan status data
-    if (newDataCount > 0) {
-      countElement.style.background = "#e74c3c"; // Merah jika ada data baru
-    } else if (totalCount > 0) {
-      countElement.style.background = "#27ae60"; // Hijau jika semua sudah diexport
-    } else {
-      countElement.style.background = "#34495e"; // Default jika kosong
-    }
-    
-    // Animasi update count
-    countElement.style.transform = "scale(1.1)";
-    setTimeout(() => {
-      countElement.style.transform = "scale(1)";
-    }, 300);
-  }
-
-  // ---------- TOAST UI (DIMINIMALKAN) ----------
-  const containerId = "m3u8-toast-container";
-  function ensureToastContainer() {
-    let el = document.getElementById(containerId);
-    if (!el) {
-      el = document.createElement("div");
-      el.id = containerId;
-      el.style.cssText = `
-        position:fixed; top:10px; right:10px; z-index:999999;
-        display:flex; flex-direction:column; gap:8px; max-width:300px;
-      `;
-      document.body.appendChild(el);
-    }
-    return el;
-  }
-
-  function makeButton(label, onClick, small = false) {
-    const btn = document.createElement("button");
-    btn.textContent = label;
+  // Simple UI Button
+  function createSimpleUI() {
+    const btn = document.createElement('button');
+    btn.innerHTML = '📁 Export M3U8';
     btn.style.cssText = `
-      background:#444; color:#fff; border:none; padding:${small ? "2px 6px" : "4px 8px"};
-      margin-left:5px; border-radius:4px; cursor:pointer; font-size:${small ? "11px" : "13px"};
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      z-index: 99999;
+      background: #2c3e50;
+      color: white;
+      border: none;
+      padding: 8px 12px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 12px;
+      font-family: Arial, sans-serif;
     `;
-    btn.onclick = onClick;
-    return btn;
+    btn.onclick = window.exportM3U8JSON;
+    document.body.appendChild(btn);
   }
 
-  // Notifikasi Episode (auto-hide) - DIMINIMALKAN
-  function showToast(record) {
-    // Skip toast setelah 5 data pertama untuk mengurangi notifikasi
-    if (window.m3u8Store.length > 5) return;
-    
-    const container = ensureToastContainer();
-    const toast = document.createElement("div");
-    toast.style.cssText = `
-      background:#222; color:#fff; padding:8px; border-radius:6px;
-      box-shadow:0 2px 6px rgba(0,0,0,0.3); font-family:sans-serif;
-      animation:fadeIn 0.3s ease; font-size: 12px;
-    `;
+  // Init
+  createSimpleUI();
+  console.log("%c[OK] M3U8 Sniffer aktif. Auto export dalam 2 detik setelah data stabil.", "color: orange;");
 
-    const ep = record.episodeNumber ?? record.episodeDisplay ?? "Unknown";
-    toast.innerHTML = `<div style="font-weight:bold;margin-bottom:2px">🎬 Ep ${ep}</div>`;
-
-    const btnRow = document.createElement("div");
-    btnRow.style.marginTop = "4px";
-    btnRow.appendChild(makeButton("Copy", () => {
-      navigator.clipboard.writeText(record.url);
-      toastSuccess("URL dicopy", 1000);
-    }, true));
-    btnRow.appendChild(makeButton("✕", () => toast.remove(), true));
-
-    toast.appendChild(btnRow);
-    container.appendChild(toast);
-
-    // Auto-hide lebih cepat
-    setTimeout(() => {
-      toast.style.transition = "opacity 0.3s";
-      toast.style.opacity = "0";
-      setTimeout(() => toast.remove(), 300);
-    }, 2000);
-  }
-
-  // Toast functions dengan durasi lebih pendek
-  function toastInfo(msg, duration = 2000) {
-    const c = ensureToastContainer();
-    const el = document.createElement("div");
-    el.style.cssText = `background:#3498db;color:#fff;padding:6px 8px;border-radius:6px;font-size:12px;`;
-    el.textContent = msg;
-    c.appendChild(el);
-    setTimeout(() => el.remove(), duration);
-  }
-
-  function toastSuccess(msg, duration = 2000) {
-    const c = ensureToastContainer();
-    const el = document.createElement("div");
-    el.style.cssText = `
-      background:#2ecc71;color:#fff;padding:8px 10px;border-radius:6px;font-size:12px;
-      line-height:1.4;text-align:center;
-    `;
-    el.innerHTML = msg; // Gunakan innerHTML untuk support line breaks
-    c.appendChild(el);
-    setTimeout(() => el.remove(), duration);
-  }
-
-  // Sticky Export All Toast
-  (function showStickyExport() {
-    const container = ensureToastContainer();
-    let existing = document.getElementById("m3u8-sticky-export");
-    if (existing) return;
-
-    const toast = document.createElement("div");
-    toast.id = "m3u8-sticky-export";
-    toast.style.cssText = `
-      background:#2c3e50; color:#fff; padding:10px; border-radius:6px;
-      box-shadow:0 2px 6px rgba(0,0,0,0.4); font-family:sans-serif;
-    `;
-    toast.innerHTML = `<div style="font-weight:bold;margin-bottom:6px">📂 Export M3U8</div>`;
-
-    const btnRow = document.createElement("div");
-    btnRow.appendChild(makeButton("Export All", () => window.exportM3U8JSON()));
-    btnRow.appendChild(makeButton("View", () => window.viewM3U8Data(), true));
-    btnRow.appendChild(makeButton("Clear", () => window.clearM3U8Data(), true));
-    btnRow.appendChild(makeButton("Dedupe", () => window.deduplicateM3U8(), true));
-
-    toast.appendChild(btnRow);
-    container.appendChild(toast);
-    
-    // Tambahkan tombol auto close tab dan auto export
-    updateAutoCloseTabButton();
-    updateAutoExportButton();
-    updateDataCount();
-  })();
-
-  // ---------- CLEAN DUPLICATE ----------
-  window.deduplicateM3U8 = function () {
-    const originalCount = window.m3u8Store.length;
-    const unique = [];
-    const seen = new Set();
-    for (const rec of window.m3u8Store) {
-      if (!seen.has(rec.url)) {
-        seen.add(rec.url);
-        unique.push(rec);
-      }
-    }
-    const removedCount = originalCount - unique.length;
-    window.m3u8Store = unique;
-    updateDataCount();
-    toastSuccess(`✅ ${removedCount} duplikat dibersihkan`, 2000);
-  };
-
-  console.log("%c[OK] M3U8 Sniffer aktif. Semua URL akan dicatat di window.m3u8Store", "color: orange;");
-  console.log("%c[Auto Close Tab] " + (AUTO_CLOSE_SETTINGS.enabled ? "AKTIF 🔴" : "NONAKTIF ⚪"), "color: cyan;");
-  console.log("%c[Auto Export] " + (AUTO_EXPORT_SETTINGS.enabled ? `AKTIF 🟢 (${AUTO_EXPORT_SETTINGS.delay}ms)` : "NONAKTIF ⚪"), "color: green;");
-  console.log("%c[Filename] Sistem akan menggunakan: Clipboard → Title → URL → Default", "color: blue;");
 })();
