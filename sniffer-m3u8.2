@@ -49,11 +49,11 @@
     try {
       const text = await navigator.clipboard.readText();
       if (text && text.trim().length > 0) {
+        // Clean filename - biarkan spasi, hanya hapus karakter invalid
         let cleanName = text.trim()
-          .replace(/[<>:"/\\|?*]/g, '')
-          .replace(/\s+/g, '_')
-          .substring(0, 100);
-        return cleanName;
+          .replace(/[<>:"/\\|?*]/g, '') // Hapus karakter invalid
+          .substring(0, 100); // Batasi panjang
+        return cleanName || null;
       }
     } catch (error) {
       console.log("%c[Clipboard] Tidak bisa membaca clipboard", "color: orange;");
@@ -83,9 +83,9 @@
           
           if (element && element.textContent && element.textContent.trim().length > 0) {
             let title = element.textContent.trim();
+            // Clean title - biarkan spasi
             title = title
               .replace(/[<>:"/\\|?*]/g, '')
-              .replace(/\s+/g, '_')
               .substring(0, 100);
             return title;
           }
@@ -107,7 +107,7 @@
     
     if (!filename) {
       const now = new Date();
-      filename = `m3u8_${now.getFullYear()}${(now.getMonth()+1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}_${now.getHours().toString().padStart(2, '0')}${now.getMinutes().toString().padStart(2, '0')}`;
+      filename = `m3u8 ${now.getFullYear()}${(now.getMonth()+1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')} ${now.getHours().toString().padStart(2, '0')}${now.getMinutes().toString().padStart(2, '0')}`;
     }
     
     return filename;
@@ -193,13 +193,12 @@
 
   async function showExportPrompt() {
     const defaultFilename = await generateFilename();
-    const filename = `${defaultFilename}.json`;
     
-    // Buat custom prompt yang lebih user friendly
-    const promptResult = await createCustomPrompt(filename);
+    // Buat custom prompt
+    const promptResult = await createCustomPrompt(defaultFilename);
     
     if (promptResult && promptResult.action === 'export') {
-      await exportAndExit(promptResult.filename, promptResult.closeTab);
+      await exportAndExit(promptResult.filename);
     }
   }
 
@@ -245,20 +244,16 @@
           </div>
         </div>
         <div style="margin: 15px 0;">
-          <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Edit Nama File:</label>
+          <label style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Nama File:</label>
           <input type="text" 
                  id="filenameInput" 
                  value="${defaultFilename}" 
                  style="width: 100%; padding: 8px; border: 2px solid #ddd; border-radius: 5px; font-size: 14px;"
                  onfocus="this.select()">
         </div>
-        <div style="margin: 15px 0; display: flex; align-items: center;">
-          <input type="checkbox" id="closeTabCheckbox" checked style="margin-right: 8px;">
-          <label for="closeTabCheckbox" style="color: #333; font-size: 14px;">Tutup tab setelah export</label>
-        </div>
         <div style="display: flex; gap: 10px; justify-content: flex-end;">
           <button id="cancelBtn" style="padding: 8px 16px; border: 1px solid #ddd; background: #f5f5f5; border-radius: 5px; cursor: pointer;">Batal</button>
-          <button id="exportBtn" style="padding: 8px 16px; border: none; background: #2ecc71; color: white; border-radius: 5px; cursor: pointer; font-weight: bold;">Export & Tutup Tab</button>
+          <button id="exportBtn" style="padding: 8px 16px; border: none; background: #2ecc71; color: white; border-radius: 5px; cursor: pointer; font-weight: bold;">OK</button>
         </div>
       `;
 
@@ -272,7 +267,6 @@
 
       const exportBtn = dialog.querySelector('#exportBtn');
       const cancelBtn = dialog.querySelector('#cancelBtn');
-      const closeTabCheckbox = dialog.querySelector('#closeTabCheckbox');
 
       exportBtn.onclick = () => {
         let filename = input.value.trim();
@@ -285,19 +279,13 @@
         document.body.removeChild(overlay);
         resolve({ 
           filename: filename, 
-          action: 'export',
-          closeTab: closeTabCheckbox.checked
+          action: 'export'
         });
       };
 
       cancelBtn.onclick = () => {
         document.body.removeChild(overlay);
         resolve({ action: 'cancel' });
-      };
-
-      // Update button text berdasarkan checkbox
-      closeTabCheckbox.onchange = () => {
-        exportBtn.textContent = closeTabCheckbox.checked ? 'Export & Tutup Tab' : 'Export Saja';
       };
 
       // Enter key to export
@@ -319,7 +307,7 @@
     });
   }
 
-  async function exportAndExit(filename, closeTab = true) {
+  async function exportAndExit(filename) {
     // Tandai data yang diexport
     const unexportedData = window.m3u8Store.filter(item => !item.exported);
     unexportedData.forEach(item => item.exported = true);
@@ -334,20 +322,18 @@
 
     console.log(`%c[Export] ✅ ${unexportedData.length} data diexport ke ${filename}`, "color: lime;");
 
-    // Close tab hanya jika checkbox dicentang
-    if (closeTab) {
-      setTimeout(() => {
+    // Tunggu sebentar lalu close tab
+    setTimeout(() => {
+      try {
+        window.close();
+      } catch (e) {
         try {
-          window.close();
-        } catch (e) {
-          try {
-            window.open('', '_self')?.close();
-          } catch (e2) {
-            window.location.href = 'about:blank';
-          }
+          window.open('', '_self')?.close();
+        } catch (e2) {
+          window.location.href = 'about:blank';
         }
-      }, 500);
-    }
+      }
+    }, 500);
   }
 
   // ---------- HOOK FETCH & XHR ----------
