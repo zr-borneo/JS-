@@ -21,6 +21,7 @@
 
   let autoExportTimer = null;
   let lastDataTimestamp = null;
+  let lastFilenameSource = ''; // Untuk menyimpan sumber filename terakhir
 
   function extractEpisodeFromURL(url) {
     // Pertama coba ekstrak dari URL seperti sebelumnya
@@ -65,7 +66,7 @@
           .replace(/[<>:"/\\|?*]/g, '') // Hapus karakter invalid
           .replace(/\s+/g, '_') // Ganti spasi dengan underscore
           .substring(0, 100); // Batasi panjang
-        return cleanName || null;
+        return { name: cleanName, source: 'CLIPBOARD' };
       }
     } catch (error) {
       console.log("%c[Clipboard] Tidak bisa membaca clipboard:", "color: orange;", error);
@@ -105,7 +106,7 @@
               .replace(/[<>:"/\\|?*]/g, '')
               .replace(/\s+/g, '_')
               .substring(0, 100);
-            return title || null;
+            return { name: title, source: 'TITLE' };
           }
         } catch (e) {
           // Continue ke selector berikutnya
@@ -122,7 +123,8 @@
       const url = new URL(window.location.href);
       const pathParts = url.pathname.split('/').filter(part => part.length > 0);
       if (pathParts.length > 0) {
-        return pathParts[pathParts.length - 1].replace(/[^a-zA-Z0-9]/g, '_');
+        const name = pathParts[pathParts.length - 1].replace(/[^a-zA-Z0-9]/g, '_');
+        return { name: name, source: 'URL' };
       }
     } catch (error) {
       console.log("%c[URL] Tidak bisa mendapatkan nama dari URL:", "color: orange;", error);
@@ -132,23 +134,35 @@
 
   async function generateFilename() {
     // Priority: Clipboard -> Title -> URL -> Default
-    let filename = await getFilenameFromClipboard();
+    let result = await getFilenameFromClipboard();
     
-    if (!filename) {
-      filename = getFilenameFromTitle();
+    if (!result) {
+      result = getFilenameFromTitle();
     }
     
-    if (!filename) {
-      filename = getFilenameFromURL();
+    if (!result) {
+      result = getFilenameFromURL();
     }
     
     // Fallback ke default dengan timestamp
-    if (!filename) {
+    if (!result) {
       const now = new Date();
-      filename = `m3u8_${now.getFullYear()}${(now.getMonth()+1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}_${now.getHours().toString().padStart(2, '0')}${now.getMinutes().toString().padStart(2, '0')}`;
+      const name = `m3u8_${now.getFullYear()}${(now.getMonth()+1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}_${now.getHours().toString().padStart(2, '0')}${now.getMinutes().toString().padStart(2, '0')}`;
+      result = { name: name, source: 'DEFAULT' };
     }
     
-    return filename;
+    lastFilenameSource = result.source; // Simpan sumber untuk ditampilkan di toast
+    return result.name;
+  }
+
+  function getSourceDisplayName(source) {
+    const sourceNames = {
+      'CLIPBOARD': '📋 Clipboard',
+      'TITLE': '🏷️ Title', 
+      'URL': '🔗 URL',
+      'DEFAULT': '⏰ Default'
+    };
+    return sourceNames[source] || source;
   }
 
   function saveRecord(url) {
@@ -220,7 +234,8 @@
       timestamp: new Date().toISOString(),
       dataCount: window.m3u8Store.length,
       newDataCount: unexportedData.length,
-      auto: true // Tandai sebagai auto export
+      auto: true, // Tandai sebagai auto export
+      source: lastFilenameSource // Simpan sumber filename
     };
     window.m3u8ExportHistory.push(exportRecord);
 
@@ -235,7 +250,11 @@
     updateDataCount();
     
     console.log(`%c[Auto Export] ✅ ${unexportedData.length} data diexport ke ${filename}`, "color: lime; font-weight: bold;");
-    console.log(`%c[Filename Source] ${getFilenameSource(baseFilename)}`, "color: cyan;");
+    console.log(`%c[Filename Source] ${lastFilenameSource}`, "color: cyan;");
+    
+    // Tampilkan toast dengan info sumber filename
+    const sourceDisplay = getSourceDisplayName(lastFilenameSource);
+    toastSuccess(`✅ ${unexportedData.length} data diexport<br>📁 ${filename}<br>${sourceDisplay}`, 3000);
     
     // Auto close tab setelah export jika enabled
     if (AUTO_CLOSE_SETTINGS.enabled) {
@@ -243,12 +262,6 @@
         closeCurrentTab();
       }, AUTO_CLOSE_SETTINGS.delay);
     }
-  }
-
-  function getFilenameSource(filename) {
-    if (filename.includes('m3u8_202')) return 'DEFAULT_TIMESTAMP';
-    if (filename.match(/^[a-f0-9]+$/)) return 'URL';
-    return 'CLIPBOARD_OR_TITLE';
   }
 
   // ---------- HOOK FETCH ----------
@@ -402,7 +415,8 @@
       timestamp: new Date().toISOString(),
       dataCount: window.m3u8Store.length,
       newDataCount: unexportedData.length,
-      auto: false // Manual export
+      auto: false, // Manual export
+      source: lastFilenameSource // Simpan sumber filename
     };
     window.m3u8ExportHistory.push(exportRecord);
 
@@ -416,12 +430,13 @@
 
     updateDataCount();
     
+    const sourceDisplay = getSourceDisplayName(lastFilenameSource);
     const toastMsg = unexportedData.length > 0 
-      ? `✅ ${unexportedData.length} data baru diexport ke ${filename}`
-      : `✅ Data diexport ke ${filename}`;
+      ? `✅ ${unexportedData.length} data baru diexport<br>📁 ${filename}<br>${sourceDisplay}`
+      : `✅ Data diexport<br>📁 ${filename}<br>${sourceDisplay}`;
     
-    toastSuccess(toastMsg, 1500);
-    console.log(`%c[Export] Filename source: ${getFilenameSource(baseFilename)}`, "color: cyan;");
+    toastSuccess(toastMsg, 3000);
+    console.log(`%c[Export] Filename source: ${lastFilenameSource}`, "color: cyan;");
 
     // Auto close tab setelah export jika enabled
     if (AUTO_CLOSE_SETTINGS.enabled) {
@@ -596,6 +611,28 @@
     }, 2000);
   }
 
+  // Toast functions dengan durasi lebih pendek
+  function toastInfo(msg, duration = 2000) {
+    const c = ensureToastContainer();
+    const el = document.createElement("div");
+    el.style.cssText = `background:#3498db;color:#fff;padding:6px 8px;border-radius:6px;font-size:12px;`;
+    el.textContent = msg;
+    c.appendChild(el);
+    setTimeout(() => el.remove(), duration);
+  }
+
+  function toastSuccess(msg, duration = 2000) {
+    const c = ensureToastContainer();
+    const el = document.createElement("div");
+    el.style.cssText = `
+      background:#2ecc71;color:#fff;padding:8px 10px;border-radius:6px;font-size:12px;
+      line-height:1.4;text-align:center;
+    `;
+    el.innerHTML = msg; // Gunakan innerHTML untuk support line breaks
+    c.appendChild(el);
+    setTimeout(() => el.remove(), duration);
+  }
+
   // Sticky Export All Toast
   (function showStickyExport() {
     const container = ensureToastContainer();
@@ -624,25 +661,6 @@
     updateAutoExportButton();
     updateDataCount();
   })();
-
-  // Toast functions dengan durasi lebih pendek
-  function toastInfo(msg, duration = 2000) {
-    const c = ensureToastContainer();
-    const el = document.createElement("div");
-    el.style.cssText = `background:#3498db;color:#fff;padding:6px 8px;border-radius:6px;font-size:12px;`;
-    el.textContent = msg;
-    c.appendChild(el);
-    setTimeout(() => el.remove(), duration);
-  }
-
-  function toastSuccess(msg, duration = 2000) {
-    const c = ensureToastContainer();
-    const el = document.createElement("div");
-    el.style.cssText = `background:#2ecc71;color:#fff;padding:6px 8px;border-radius:6px;font-size:12px;`;
-    el.textContent = msg;
-    c.appendChild(el);
-    setTimeout(() => el.remove(), duration);
-  }
 
   // ---------- CLEAN DUPLICATE ----------
   window.deduplicateM3U8 = function () {
