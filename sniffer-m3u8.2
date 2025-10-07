@@ -7,10 +7,10 @@
   let episodeClickCounter = 0;
   let lastClickedEpisode = null;
 
-  // Settings untuk auto close
+  // Settings untuk auto close tab
   const AUTO_CLOSE_SETTINGS = {
-    enabled: true, // Default enable auto close
-    delay: 2000 // 2 detik setelah export
+    enabled: true, // Default enable auto close tab
+    delay: 3000 // 3 detik setelah export
   };
 
   function extractEpisodeFromURL(url) {
@@ -94,21 +94,26 @@
     return origOpen.call(this, method, url, ...rest);
   };
 
-  // ---------- FITUR AUTO CLOSE ----------
-  window.toggleAutoClose = function() {
+  // ---------- FITUR AUTO CLOSE TAB ----------
+  window.toggleAutoCloseTab = function() {
     AUTO_CLOSE_SETTINGS.enabled = !AUTO_CLOSE_SETTINGS.enabled;
-    updateAutoCloseButton();
-    toastInfo(`Auto Close ${AUTO_CLOSE_SETTINGS.enabled ? 'diaktifkan' : 'dinonaktifkan'}`, 1500);
+    updateAutoCloseTabButton();
+    
+    const status = AUTO_CLOSE_SETTINGS.enabled ? 'diaktifkan' : 'dinonaktifkan';
+    toastInfo(`Auto Close Tab ${status} - Tab akan tertutup dalam ${AUTO_CLOSE_SETTINGS.delay/1000} detik setelah export`, 3000);
+    
+    // Simpan preference ke localStorage
+    localStorage.setItem('m3u8AutoCloseTab', AUTO_CLOSE_SETTINGS.enabled);
   };
 
-  function updateAutoCloseButton() {
+  function updateAutoCloseTabButton() {
     const stickyToast = document.getElementById("m3u8-sticky-export");
     if (!stickyToast) return;
     
-    let autoCloseBtn = stickyToast.querySelector(".auto-close-btn");
+    let autoCloseBtn = stickyToast.querySelector(".auto-close-tab-btn");
     if (!autoCloseBtn) {
       autoCloseBtn = document.createElement("button");
-      autoCloseBtn.className = "auto-close-btn";
+      autoCloseBtn.className = "auto-close-tab-btn";
       autoCloseBtn.style.cssText = `
         background: #444; 
         color: #fff; 
@@ -120,24 +125,97 @@
         font-size: 11px;
         border: 1px solid #666;
       `;
-      autoCloseBtn.title = "Toggle Auto Close setelah export";
+      autoCloseBtn.title = "Toggle Auto Close Tab setelah export";
       stickyToast.querySelector("div").appendChild(autoCloseBtn);
     }
     
-    autoCloseBtn.textContent = AUTO_CLOSE_SETTINGS.enabled ? "🔴 Auto" : "⚪ Auto";
+    autoCloseBtn.textContent = AUTO_CLOSE_SETTINGS.enabled ? "🔴 Close Tab" : "⚪ Close Tab";
     autoCloseBtn.style.background = AUTO_CLOSE_SETTINGS.enabled ? "#e74c3c" : "#444";
+    autoCloseBtn.onclick = window.toggleAutoCloseTab;
   }
 
-  function closeAllToasts() {
-    const container = document.getElementById("m3u8-toast-container");
-    if (!container) return;
+  function closeCurrentTab() {
+    console.log("%c[Auto Close Tab] Menutup tab...", "color: red; font-weight: bold;");
     
-    const toasts = container.querySelectorAll('div:not(#m3u8-sticky-export)');
-    toasts.forEach(toast => {
-      toast.style.transition = "opacity 0.5s";
-      toast.style.opacity = "0";
-      setTimeout(() => toast.remove(), 500);
-    });
+    // Coba berbagai method untuk close tab
+    try {
+      // Method 1: window.close() untuk tab/window yang dibuka oleh script
+      if (window.history.length > 1) {
+        window.close();
+      } else {
+        // Method 2: Untuk tab utama, buka blank page lalu close
+        window.open('', '_self')?.close();
+      }
+    } catch (e) {
+      // Method 3: Redirect ke blank page
+      window.location.href = 'about:blank';
+      
+      // Method 4: Fallback - alert user untuk close manual
+      setTimeout(() => {
+        alert("Export berhasil! Silakan tutup tab ini secara manual.");
+      }, 1000);
+    }
+  }
+
+  function startAutoCloseCountdown() {
+    if (!AUTO_CLOSE_SETTINGS.enabled) return;
+    
+    const countdownElement = document.createElement("div");
+    countdownElement.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0,0,0,0.9);
+      color: white;
+      padding: 20px;
+      border-radius: 10px;
+      z-index: 1000000;
+      font-family: Arial, sans-serif;
+      text-align: center;
+      font-size: 18px;
+      box-shadow: 0 0 20px rgba(255,0,0,0.5);
+    `;
+    
+    let secondsLeft = AUTO_CLOSE_SETTINGS.delay / 1000;
+    
+    function updateCountdown() {
+      countdownElement.innerHTML = `
+        <div style="margin-bottom: 10px;">✅ Export Berhasil!</div>
+        <div>Tab akan tertutup dalam:</div>
+        <div style="font-size: 24px; color: #ff6b6b; font-weight: bold; margin: 10px 0;">
+          ${secondsLeft} detik
+        </div>
+        <button onclick="this.parentElement.remove()" style="
+          background: #666; 
+          color: white; 
+          border: none; 
+          padding: 5px 10px; 
+          border-radius: 5px; 
+          cursor: pointer;
+        ">
+          Batalkan
+        </button>
+      `;
+      
+      secondsLeft--;
+      
+      if (secondsLeft >= 0) {
+        setTimeout(updateCountdown, 1000);
+      } else {
+        countdownElement.remove();
+        closeCurrentTab();
+      }
+    }
+    
+    document.body.appendChild(countdownElement);
+    updateCountdown();
+  }
+
+  // Load auto close preference dari localStorage
+  const savedAutoClose = localStorage.getItem('m3u8AutoCloseTab');
+  if (savedAutoClose !== null) {
+    AUTO_CLOSE_SETTINGS.enabled = savedAutoClose === 'true';
   }
 
   // ---------- EXPORT ALL ----------
@@ -179,14 +257,14 @@
       ? `✅ ${unexportedData.length} data baru diexport ke ${filename}`
       : `✅ Data diexport ke ${filename} (semua data sudah pernah diexport)`;
     
-    toastSuccess(toastMsg, 3000);
+    toastSuccess(toastMsg, 2000);
 
-    // Auto close semua toast setelah export jika enabled
+    // Auto close tab setelah export jika enabled
     if (AUTO_CLOSE_SETTINGS.enabled) {
+      console.log(`%c[Auto Close Tab] Akan menutup tab dalam ${AUTO_CLOSE_SETTINGS.delay/1000} detik`, "color: orange;");
       setTimeout(() => {
-        closeAllToasts();
-        console.log("%c[Auto Close] Semua toast ditutup setelah export", "color: cyan;");
-      }, AUTO_CLOSE_SETTINGS.delay);
+        startAutoCloseCountdown();
+      }, 1000); // Tunggu 1 detik dulu biar toast keliatan
     }
   };
 
@@ -379,8 +457,8 @@
     toast.appendChild(btnRow);
     container.appendChild(toast);
     
-    // Tambahkan tombol auto close
-    updateAutoCloseButton();
+    // Tambahkan tombol auto close tab
+    updateAutoCloseTabButton();
     updateDataCount();
   })();
 
@@ -421,5 +499,5 @@
   };
 
   console.log("%c[OK] M3U8 Sniffer aktif. Semua URL akan dicatat di window.m3u8Store", "color: orange;");
-  console.log("%c[Auto Close] Fitur auto close aktif (🔴)", "color: cyan;");
+  console.log("%c[Auto Close Tab] Fitur: " + (AUTO_CLOSE_SETTINGS.enabled ? "AKTIF 🔴" : "NONAKTIF ⚪"), "color: cyan;");
 })();
